@@ -1,4 +1,6 @@
 import os
+import time
+import uuid
 import uvicorn
 import traceback
 import tensorflow as tf
@@ -63,10 +65,7 @@ class CompatibleInputLayer(KInputLayer):
         super().__init__(*args, **kwargs)
 
 def DTypePolicy(**kwargs):
-    """
-    Shim for legacy-serialized dtype policies like:
-    {'module': 'keras', 'class_name': 'DTypePolicy', 'config': {'name': 'float32'}}
-    """
+    """Shim for legacy-serialized dtype policies."""
     name = kwargs.get("name", "float32")
     return mixed_precision.Policy(name)
 
@@ -83,7 +82,7 @@ def _load_model_once():
             compile=False,
             custom_objects={
                 "InputLayer": CompatibleInputLayer,
-                "DTypePolicy": DTypePolicy,  # <-- important
+                "DTypePolicy": DTypePolicy,
             },
         )
         _image_classifier = ImageClassifier(_model)
@@ -94,7 +93,6 @@ def _load_model_once():
 
 @app.on_event("startup")
 def on_startup():
-    # Try to load at boot; if it fails, app still stays up and /healthz reports the reason.
     _load_model_once()
 
 @app.get("/")
@@ -103,7 +101,6 @@ def index():
 
 @app.get("/healthz")
 def healthz():
-    """Basic health/status including model state."""
     return {
         "ok": _startup_error is None,
         "model_loaded": _model is not None,
@@ -112,15 +109,23 @@ def healthz():
     }
 
 # --- Upload helper: send bytes to Supabase Storage and return public URL
-def _upload_to_supabase(file_bytes: bytes, filename: str) -> str | None:
+def _upload_to_supabase(file_bytes: bytes, filename: str, content_type: str | None) -> str | None:
     client = get_supabase()
     if client is None:
         return None
-    key = f"uploads/{os.path.basename(filename)}"
-    res = client.storage.from_(SUPABASE_BUCKET).upload(key, file_bytes, {"upsert": True})
+
+    # unique key to avoid collisions
+    base = os.path.basename(filename) or "image.jpg"
+    key = f"uploads/{time.strftime('%Y/%m/%d')}/{uuid.uuid4().hex}_{base}"
+
+    # IMPORTANT: no bools in options; or pass strings if you really need them.
+    # Minimal + robust: no options at all.
+    res = client.storage.from_(SUPABASE_BUCKET).upload(key, file_bytes)
     if isinstance(res, dict) and res.get("error"):
         print("Supabase upload error:", res["error"])
         return None
+
+    # If your bucket is private, consider create_signed_url here instead.
     return client.storage.from_(SUPABASE_BUCKET).get_public_url(key)
 
 @app.post("/predict")
@@ -163,7 +168,7 @@ async def predict_image(uploaded_file: UploadFile, response: Response):
         image_url = CLOUD_STORAGE_URLS.get(predicted_class)
 
         # Optional: upload the user's image to Supabase
-        uploaded_public_url = _upload_to_supabase(file_content, uploaded_file.filename)
+        uploaded_public_url = _upload_to_supabase(file_content, uploaded_file.filename, uploaded_file.content_type)
 
         return JSONResponse(
             status_code=200,
