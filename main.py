@@ -66,26 +66,15 @@ def index():
 
 # --- NEW: helper to upload bytes to Supabase and return a public URL
 def _upload_to_supabase(file_bytes: bytes, filename: str) -> str | None:
-    """
-    Uploads bytes to Supabase Storage (SUPABASE_BUCKET) and returns a public URL.
-    Returns None if Supabase is not configured.
-    """
-    if supabase is None:
+    client = get_supabase()
+    if client is None:
         return None
-    # Optional: prefix with a folder and a simple unique suffix
-    # Avoid collisions, keep it simple without changing your structure
-    base_name = os.path.basename(filename)
-    key = f"uploads/{base_name}"
-
-    # upsert=True to overwrite on same name (you can switch to unique names if needed)
-    res = supabase.storage.from_(SUPABASE_BUCKET).upload(key, file_bytes, {"upsert": True})
+    key = f"uploads/{os.path.basename(filename)}"
+    res = client.storage.from_(SUPABASE_BUCKET).upload(key, file_bytes, {"upsert": True})
     if isinstance(res, dict) and res.get("error"):
-        # Log silently; don’t kill the request just because upload failed
         print("Supabase upload error:", res["error"])
         return None
-
-    public_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(key)
-    return public_url
+    return client.storage.from_(SUPABASE_BUCKET).get_public_url(key)
 
 @app.post("/predict")
 async def predict_image(uploaded_file: UploadFile, response: Response):
