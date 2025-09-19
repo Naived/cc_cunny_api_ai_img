@@ -47,6 +47,7 @@ def get_supabase() -> Client | None:
 
 # --- Model load (lazy + legacy H5 compatibility)
 from tensorflow.keras.layers import InputLayer as KInputLayer
+from tensorflow.keras import mixed_precision
 
 MODEL_PATH = os.getenv("MODEL_PATH", "buah.h5")
 
@@ -61,6 +62,14 @@ class CompatibleInputLayer(KInputLayer):
             kwargs["batch_input_shape"] = kwargs.pop("batch_shape")
         super().__init__(*args, **kwargs)
 
+def DTypePolicy(**kwargs):
+    """
+    Shim for legacy-serialized dtype policies like:
+    {'module': 'keras', 'class_name': 'DTypePolicy', 'config': {'name': 'float32'}}
+    """
+    name = kwargs.get("name", "float32")
+    return mixed_precision.Policy(name)
+
 def _load_model_once():
     """Load the model exactly once; never crash the process if it fails."""
     global _model, _image_classifier, _startup_error
@@ -72,7 +81,10 @@ def _load_model_once():
         _model = tf.keras.models.load_model(
             MODEL_PATH,
             compile=False,
-            custom_objects={"InputLayer": CompatibleInputLayer},
+            custom_objects={
+                "InputLayer": CompatibleInputLayer,
+                "DTypePolicy": DTypePolicy,  # <-- important
+            },
         )
         _image_classifier = ImageClassifier(_model)
         print("[BOOT] Model loaded OK:", MODEL_PATH)
