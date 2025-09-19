@@ -32,9 +32,18 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://biennddgojeyshruogja.supa
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")  # set in Railway
 SUPABASE_BUCKET = os.environ.get("SUPABASE_BUCKET", "Upload-Bucket")
 
-supabase: Client | None = None
-if SUPABASE_URL and SUPABASE_KEY:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+_supabase: Client | None = None
+
+def get_supabase() -> Client | None:
+    global _supabase
+    if _supabase is None and SUPABASE_URL and SUPABASE_KEY:
+        try:
+            _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            print("[SUPABASE] client initialized")
+        except Exception as e:
+            print(f"[SUPABASE] init failed: {e}")
+            _supabase = None
+    return _supabase
 
 # Path to the model file
 MODEL_PATH = "buah.h5"  # Ensure this is copied to the container's working directory
